@@ -1,5 +1,8 @@
-streamlit>=1.30.0
-moviepy>=1.0.3
-faster-whisper>=1.0.0
-python-dotenv>=1.0.0
+streamlit
+moviepy
+faster-whisper
+python-dotenv
 groq
+imageio-ffmpeg
+av
+ctranslate2
