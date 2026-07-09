@@ -135,12 +135,14 @@ def generate_srt_with_groq(client: Groq, audio_path: str) -> str:
 def translate_srt_with_groq(client: Groq, srt_content: str) -> str: 
     """Gọi Groq API để dịch toàn bộ file SRT sang tiếng Việt"""
     prompt = f"""
-    Dịch toàn bộ nội dung phụ đề SRT sau đây sang tiếng Việt. 
+    Bạn là một chuyên gia dịch thuật video ngắn (Shorts/TikTok) chuyên nghiệp.
+    NHIỆM VỤ: Dịch toàn bộ nội dung phụ đề SRT sau đây sang tiếng Việt, đảm bảo: 
     YÊU CẦU NGHIÊM NGẶT: 
     1. Giữ nguyên 100% cấu trúc số thứ tự và mốc thời gian (timestamp).
     2. Chỉ dịch phần văn bản hội thoại (text).
-    3. Chỉ trả về duy nhất nội dung file SRT đã dịch. 
-    4. KHÔNG giải thích, KHÔNG chào hỏi, KHÔNG bọc văn bản trong thẻ markdown (ví dụ: ```srt).
+    3. KHÔNG dịch máy móc từng từ, hãy dịch sao cho tự nhiên nhất.
+    4. Chỉ trả về duy nhất nội dung file SRT đã dịch. 
+    5. KHÔNG giải thích, KHÔNG chào hỏi, KHÔNG bọc văn bản trong thẻ markdown (ví dụ: ```srt).
     
     Nội dung file SRT cần dịch:
     {srt_content}
@@ -202,7 +204,7 @@ terminology_input = st.text_area("Danh sách thuật ngữ:", placeholder="vi = 
 
 if uploaded_video and api_key:
     if not st.session_state.is_processed:
-        if st.button("🚀 Bắt đầu xử lý với Groq", type="primary", use_container_width=True):
+        if st.button("🚀 Bắt đầu xử lý", type="primary", use_container_width=True):
             
             terminology_dict = {}
             if terminology_input.strip():
