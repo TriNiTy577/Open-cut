@@ -35,42 +35,104 @@ def format_timestamp(seconds: float) -> str:
     secs = int(seconds % 60)
     millis = int((seconds - int(seconds)) * 1000)
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+def optimize_and_split_segments(segments, max_chars=40, max_duration=8.0):
+    """
+    Thuật toán cắt nhỏ các đoạn sub quá dài dựa trên dấu câu 
+    và chia lại thời gian (timestamp) theo tỷ lệ số lượng ký tự.
+    """
+    optimized_segments = []
+    
+    for seg in segments:
+        # Tương thích với cả dict và object (tùy phiên bản thư viện Groq)
+        start = float(seg.get('start', 0)) if isinstance(seg, dict) else float(getattr(seg, 'start', 0))
+        end = float(seg.get('end', 0)) if isinstance(seg, dict) else float(getattr(seg, 'end', 0))
+        text = seg.get('text', '') if isinstance(seg, dict) else getattr(seg, 'text', '')
+        text = text.strip()
+        duration = end - start
+
+        # Nếu đoạn sub dài hơn 8 giây hoặc quá 40 ký tự -> Tiến hành chia nhỏ
+        if duration > max_duration or len(text) > max_chars:
+            # Cắt theo dấu câu (hỗ trợ các dấu câu tiếng Trung/Nhật và Latin)
+            parts = re.split(r'([，。！？,\.!?])', text)
+            chunks = []
+            current_chunk = ""
+            
+            # Ghép dấu câu trở lại với từ đứng trước nó
+            for i in range(0, len(parts)-1, 2):
+                current_chunk += parts[i] + parts[i+1]
+                # Chỉ ngắt khi đoạn hiện tại đủ dài (tránh cắt vụn các từ ngắn như "Oh,")
+                if len(current_chunk) >= 12: 
+                    chunks.append(current_chunk.strip())
+                    current_chunk = ""
+                    
+            if parts[-1]:
+                current_chunk += parts[-1]
+            if current_chunk:
+                chunks.append(current_chunk.strip())
+                
+            # Fallback: Nếu không có dấu câu nào, đành cắt cứng theo độ dài ký tự
+            if not chunks or len(chunks) == 1:
+                chunks = [text[i:i+max_chars] for i in range(0, len(text), max_chars)]
+
+            # Chia lại thời gian theo tỷ lệ (Proportional Time Allocation)
+            total_chars = sum(len(c) for c in chunks)
+            current_time = start
+            
+            for chunk in chunks:
+                if total_chars > 0:
+                    chunk_duration = (len(chunk) / total_chars) * duration
+                else:
+                    chunk_duration = 0
+                    
+                chunk_end = current_time + chunk_duration
+                
+                optimized_segments.append({
+                    'start': current_time,
+                    'end': chunk_end,
+                    'text': chunk
+                })
+                current_time = chunk_end
+        else:
+            # Nếu segment đã ngắn sẵn, giữ nguyên
+            optimized_segments.append({
+                'start': start,
+                'end': end,
+                'text': text
+            })
+            
+    return optimized_segments
+
 def generate_srt_with_groq(client: Groq, audio_path: str) -> str:
-    """Sử dụng Groq Whisper API (verbose_json) và tự build thành SRT"""
+    """Sử dụng Groq Whisper API và tự động tối ưu chia nhỏ câu dài"""
     with open(audio_path, "rb") as file:
         transcription = client.audio.transcriptions.create(
             file=(os.path.basename(audio_path), file.read()),
             model="whisper-large-v3",
-            response_format="verbose_json", # Đổi từ srt thành verbose_json
+            response_format="verbose_json",
         )
     
     srt_content = ""
     
-    # Lấy danh sách các câu (segments) từ response
-    segments = transcription.segments if hasattr(transcription, 'segments') else transcription.get('segments', [])
+    # 1. Lấy danh sách segments thô từ API
+    raw_segments = transcription.segments if hasattr(transcription, 'segments') else transcription.get('segments', [])
     
-    # Tự động ghép thành định dạng chuẩn của file SRT
-    for i, segment in enumerate(segments, start=1):
-        # API trả về có thể là dictionary hoặc object tuỳ phiên bản SDK
-        if isinstance(segment, dict):
-            start = segment.get('start', 0)
-            end = segment.get('end', 0)
-            text = segment.get('text', '')
-        else:
-            start = getattr(segment, 'start', 0)
-            end = getattr(segment, 'end', 0)
-            text = getattr(segment, 'text', '')
-            
-        start_time = format_timestamp(float(start))
-        end_time = format_timestamp(float(end))
+    # 2. Xử lý qua bộ lọc: Cắt nhỏ câu dài, nội suy lại mốc thời gian
+    optimized_segments = optimize_and_split_segments(raw_segments)
+    
+    # 3. Build thành văn bản file SRT hoàn chỉnh
+    for i, segment in enumerate(optimized_segments, start=1):
+        start_time = format_timestamp(segment['start'])
+        end_time = format_timestamp(segment['end'])
+        text = segment['text']
         
         srt_content += f"{i}\n"
         srt_content += f"{start_time} --> {end_time}\n"
-        srt_content += f"{text.strip()}\n\n"
+        srt_content += f"{text}\n\n"
         
     return srt_content
 
-def translate_srt_with_groq(client: Groq, srt_content: str) -> str:
+def translate_srt_with_groq(client: Groq, srt_content: str) -> str: 
     """Gọi Groq API để dịch toàn bộ file SRT sang tiếng Việt"""
     prompt = f"""
     Dịch toàn bộ nội dung phụ đề SRT sau đây sang tiếng Việt. 
