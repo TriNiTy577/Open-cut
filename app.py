@@ -28,16 +28,47 @@ def extract_audio(video_path: str, audio_path: str):
         subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except subprocess.CalledProcessError as e:
         raise Exception(f"Lỗi khi trích xuất âm thanh với FFmpeg. Đảm bảo FFmpeg đã được cài đặt. Chi tiết: {str(e)}")
-
+def format_timestamp(seconds: float) -> str:
+    """Định dạng số giây thành chuẩn timecode của SRT: HH:MM:SS,mmm"""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    millis = int((seconds - int(seconds)) * 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 def generate_srt_with_groq(client: Groq, audio_path: str) -> str:
-    """Sử dụng Groq API (whisper-large-v3) để tạo SRT siêu tốc"""
+    """Sử dụng Groq Whisper API (verbose_json) và tự build thành SRT"""
     with open(audio_path, "rb") as file:
         transcription = client.audio.transcriptions.create(
             file=(os.path.basename(audio_path), file.read()),
             model="whisper-large-v3",
-            response_format="srt",
+            response_format="verbose_json", # Đổi từ srt thành verbose_json
         )
-    return transcription
+    
+    srt_content = ""
+    
+    # Lấy danh sách các câu (segments) từ response
+    segments = transcription.segments if hasattr(transcription, 'segments') else transcription.get('segments', [])
+    
+    # Tự động ghép thành định dạng chuẩn của file SRT
+    for i, segment in enumerate(segments, start=1):
+        # API trả về có thể là dictionary hoặc object tuỳ phiên bản SDK
+        if isinstance(segment, dict):
+            start = segment.get('start', 0)
+            end = segment.get('end', 0)
+            text = segment.get('text', '')
+        else:
+            start = getattr(segment, 'start', 0)
+            end = getattr(segment, 'end', 0)
+            text = getattr(segment, 'text', '')
+            
+        start_time = format_timestamp(float(start))
+        end_time = format_timestamp(float(end))
+        
+        srt_content += f"{i}\n"
+        srt_content += f"{start_time} --> {end_time}\n"
+        srt_content += f"{text.strip()}\n\n"
+        
+    return srt_content
 
 def translate_srt_with_groq(client: Groq, srt_content: str) -> str:
     """Gọi Groq API để dịch toàn bộ file SRT sang tiếng Việt"""
